@@ -8,7 +8,7 @@ final class NotionPoller: @unchecked Sendable {
     func start() {
         guard timer == nil else { return }
         let t = DispatchSource.makeTimerSource(queue: .global(qos: .background))
-        t.schedule(deadline: .now() + 9, repeating: 300)
+        t.schedule(deadline: .now() + 9, repeating: 300, leeway: .seconds(30))
         t.setEventHandler { [weak self] in self?.poll() }
         t.resume()
         timer = t
@@ -17,6 +17,7 @@ final class NotionPoller: @unchecked Sendable {
     func pollNow() { poll() }
 
     private func poll() {
+        guard !DemoEngine.isPollerPaused else { return }
         guard let token = KeychainStore.shared.get("notion-api-key") else { return }
         guard let url = URL(string: "https://api.notion.com/v1/search") else { return }
         var req = URLRequest(url: url, timeoutInterval: 10)
@@ -38,7 +39,7 @@ final class NotionPoller: @unchecked Sendable {
                 if code == 401 { msg = "Invalid API key (401)" }
                 else if code == 0 { msg = error?.localizedDescription ?? "No connection" }
                 else { msg = "API error \(code)" }
-                DispatchQueue.main.async { AppState.shared.notionError = msg }
+                DispatchQueue.main.async { AppState.shared.setIfChanged(\.notionError, msg) }
                 return
             }
             guard let data,
@@ -47,9 +48,9 @@ final class NotionPoller: @unchecked Sendable {
 
             let pages = results.compactMap { self.parsePage($0) }
             DispatchQueue.main.async {
-                AppState.shared.notionError = nil
+                AppState.shared.setIfChanged(\.notionError, nil)
                 AppState.shared.notionPages = pages
-                AppState.shared.notionLoaded = true
+                AppState.shared.setIfChanged(\.notionLoaded, true)
             }
         }.resume()
     }
