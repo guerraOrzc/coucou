@@ -112,6 +112,8 @@ enum PillCatalog {
               category: .service,   subtitle: "Integration",  source: .n8n),
         .init(id: "integration_vercel",  name: "Vercel",      color: "#7C5CFF",
               category: .service,   subtitle: "Integration",  source: .n8n),
+        .init(id: "integration_cloudflare", name: "Cloudflare", color: "#F6821F",
+              category: .service,   subtitle: "Integration",  source: .n8n),
         .init(id: "integration_github",  name: "GitHub",      color: "#F4505E",
               category: .service,   subtitle: "Integration",  source: .n8n),
         .init(id: "integration_notion",  name: "Notion",      color: "#8C8C8C",

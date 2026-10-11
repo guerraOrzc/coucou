@@ -194,6 +194,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         #endif
         N8nPoller.shared.start()
         VercelPoller.shared.start()
+        CloudflarePoller.shared.start()
         ResendPoller.shared.start()
         GithubPoller.shared.start()
         StripePoller.shared.start()

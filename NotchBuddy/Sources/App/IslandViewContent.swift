@@ -233,6 +233,8 @@ struct OverviewView: View {
             NSWorkspace.shared.open(URL(string: "https://resend.com/emails")!)
         case "integration_vercel":
             NSWorkspace.shared.open(URL(string: "https://vercel.com/dashboard")!)
+        case "integration_cloudflare":
+            NSWorkspace.shared.open(URL(string: "https://dash.cloudflare.com")!)
         case "integration_github":
             NSWorkspace.shared.open(URL(string: "https://github.com/pulls")!)
         case "integration_n8n":
@@ -1849,6 +1851,8 @@ struct IntegrationCardView: View {
         case "integration_resend":  return KeychainStore.shared.get("resend-api-key") != nil
         case "integration_n8n":     return KeychainStore.shared.get("n8n-api-key")    != nil
         case "integration_vercel":  return KeychainStore.shared.get("vercel-token")   != nil
+        case "integration_cloudflare":
+            return KeychainStore.shared.get("cloudflare-token") != nil && AppState.shared.cloudflareAccountId != nil
         case "integration_github":  return KeychainStore.shared.get("github-token")   != nil
         case "integration_stripe":  return KeychainStore.shared.get("stripe-api-key") != nil
         case "integration_notion":  return KeychainStore.shared.get("notion-api-key") != nil
@@ -1865,6 +1869,7 @@ struct IntegrationCardView: View {
             if let s = KeychainStore.shared.get("n8n-url") { return URL(string: s) }
             return nil
         case "integration_vercel":  return URL(string: "https://vercel.com/dashboard")
+        case "integration_cloudflare": return URL(string: "https://dash.cloudflare.com")
         case "integration_github":  return URL(string: "https://github.com")
         case "integration_stripe":  return URL(string: "https://dashboard.stripe.com/payments")
         case "integration_notion":  return URL(string: "https://notion.so")
@@ -1889,6 +1894,11 @@ struct IntegrationCardView: View {
     // Vercel with recent deployments
     private var vercelHasActivity: Bool {
         task.id == "integration_vercel" && !appState.vercelWatchedDeployments.isEmpty
+    }
+
+    // Cloudflare with recent Pages deployments or Workers builds/deployments
+    private var cloudflareHasActivity: Bool {
+        task.id == "integration_cloudflare" && !appState.cloudflareWatchedDeployments.isEmpty
     }
 
     // Resend with recent emails
@@ -1951,6 +1961,7 @@ struct IntegrationCardView: View {
         if PillCatalog.definition(for: task.id)?.comingSoon == true { return Color(hex: "#6B7079") }
         let svcErr = task.id == "integration_stripe" ? appState.stripeError
                    : task.id == "integration_calcom"  ? appState.calcomError
+                   : task.id == "integration_cloudflare" ? appState.cloudflareError
                    : nil
         if svcErr != nil { return Color(hex: "#F4505E") }
         return isConfigured ? Color(hex: "#22C55E") : Color(hex: "#F4505E")
@@ -1967,6 +1978,7 @@ struct IntegrationCardView: View {
         if PillCatalog.definition(for: task.id)?.comingSoon == true { return String(localized: "Coming soon") }
         let svcErr = task.id == "integration_stripe" ? appState.stripeError
                    : task.id == "integration_calcom"  ? appState.calcomError
+                   : task.id == "integration_cloudflare" ? appState.cloudflareError
                    : nil
         if let err = svcErr { return err }
         // Pills driven by hooks, never by a key: the idle card reports whether the
@@ -2022,6 +2034,15 @@ struct IntegrationCardView: View {
                 pickerOpen: appState.sidePanel == .vercelProjects,
                 onTapTitle: { appState.toggleSidePanel(.vercelProjects) },
                 onOpenDetail: { id in appState.toggleSidePanel(.vercelDeployment(id)) })
+            .transition(.opacity)
+        } else if cloudflareHasActivity {
+            CloudflareDeploymentListView(
+                deployments: appState.cloudflareVisibleDeployments,
+                focusLabel: appState.effectiveCloudflareFocus,
+                canPickProject: appState.cloudflareFocusOptions.count > 1 || appState.effectiveCloudflareFocus != nil,
+                pickerOpen: appState.sidePanel == .cloudflareProjects,
+                onTapTitle: { appState.toggleSidePanel(.cloudflareProjects) },
+                onOpenDetail: { id in appState.toggleSidePanel(.cloudflareDeployment(id)) })
             .transition(.opacity)
         } else if resendHasData {
             ResendCardView(emails: appState.resendEmails, total: appState.resendTotal)
@@ -2387,6 +2408,107 @@ struct VercelDeploymentListView: View {
                         .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
+                }
+            }
+            .padding(.top, 5)
+            .padding(.leading, 108)
+            .padding(.trailing, 12)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .padding(.top, 4)
+    }
+}
+
+// MARK: - Cloudflare Deployment List View
+// Same layout as the Vercel card: Pages deployments, Workers builds and Worker deployments.
+
+struct CloudflareDeploymentListView: View {
+    let deployments: [CloudflareDeployment]
+    var focusLabel: String? = nil
+    var canPickProject: Bool = false
+    var pickerOpen: Bool = false
+    var onTapTitle: () -> Void = {}
+    let onOpenDetail: (String) -> Void
+
+    private func trailing(_ dep: CloudflareDeployment) -> String {
+        dep.isBuilding ? dep.statusLabel.lowercased() + "…" : dep.timeAgo
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header
+            HStack(spacing: 6) {
+                Circle()
+                    .fill(Color(hex: "#F6821F"))
+                    .frame(width: 7, height: 7)
+                FocusTitleButton(title: "Cloudflare", selection: focusLabel,
+                                 canPick: canPickProject, isOpen: pickerOpen, action: onTapTitle)
+                Text("Deployments")
+                    .font(.system(size: 11))
+                    .foregroundColor(Color(hex: "#8E939C"))
+                    .lineLimit(1)
+            }
+            .padding(.top, 6)
+            .padding(.leading, 108)
+            .padding(.trailing, 36)
+
+            VStack(alignment: .leading, spacing: 3) {
+                // First row — highlighted, with detail button
+                if let first = deployments.first {
+                    let accent = Color(hex: first.stateColor)
+                    HStack(spacing: 5) {
+                        Circle().fill(accent).frame(width: 5, height: 5)
+                        Text(first.name)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(Color(hex: "#C5C8CD"))
+                            .lineLimit(1).truncationMode(.tail)
+                            .layoutPriority(1)
+                        Text(trailing(first))
+                            .font(.system(size: 10))
+                            .foregroundColor(Color(hex: "#6B7079"))
+                        Button(action: { onOpenDetail(first.id) }) {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 8, weight: .medium))
+                                .foregroundColor(Color(hex: "#6B7079"))
+                                .frame(width: 18, height: 18)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(.horizontal, 8).padding(.vertical, 3)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(accent.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 5))
+                    .help("\(first.kindLabel) · \(first.statusLabel)")
+                }
+
+                if deployments.isEmpty {
+                    Text("No recent deployments")
+                        .font(.system(size: 11))
+                        .foregroundColor(Color(hex: "#6B7079"))
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                }
+
+                ForEach(Array(deployments.dropFirst().prefix(2))) { dep in
+                    let accent = Color(hex: dep.stateColor)
+                    Button(action: { onOpenDetail(dep.id) }) {
+                        HStack(spacing: 5) {
+                            Circle().fill(accent).frame(width: 5, height: 5)
+                            Text(dep.name)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(Color(hex: "#9398A1"))
+                                .lineLimit(1).truncationMode(.tail)
+                                .layoutPriority(1)
+                            Text(trailing(dep))
+                                .font(.system(size: 10))
+                                .foregroundColor(Color(hex: "#6B7079"))
+                        }
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("\(dep.kindLabel) · \(dep.statusLabel)")
                 }
             }
             .padding(.top, 5)

@@ -100,6 +100,7 @@ struct SettingsView: View {
     @State private var n8nKey: String       = KeychainStore.shared.get("n8n-api-key")     ?? ""
     @State private var vercelToken: String  = KeychainStore.shared.get("vercel-token")    ?? ""
     @State private var githubToken: String  = KeychainStore.shared.get("github-token")    ?? ""
+    @State private var cloudflareToken: String = KeychainStore.shared.get("cloudflare-token") ?? ""
     @State private var stripeKey: String    = KeychainStore.shared.get("stripe-api-key")  ?? ""
     @State private var calcomKey: String    = KeychainStore.shared.get("calcom-api-key")  ?? ""
     @State private var notionKey: String    = KeychainStore.shared.get("notion-api-key")  ?? ""
@@ -113,6 +114,12 @@ struct SettingsView: View {
     @State private var loadingVercel: Bool = false
     @State private var vercelTeams: [(id: String, name: String)] = []
     @State private var loadingVercelTeams: Bool = false
+
+    // Cloudflare account + watched Pages projects / Workers
+    @State private var cloudflareAccounts: [(id: String, name: String)] = []
+    @State private var loadingCloudflareAccounts: Bool = false
+    @State private var cloudflareProjects: [String] = []
+    @State private var loadingCloudflare: Bool = false
 
     // GitHub watched repos
     @State private var githubRepos: [String] = []
@@ -1231,6 +1238,49 @@ struct SettingsView: View {
                     )
                 }
 
+                // Cloudflare
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 6) {
+                        Circle().fill(Color(hex: "#F6821F")).frame(width: 8, height: 8)
+                        Text("Cloudflare").font(.system(size: 12, weight: .semibold))
+                    }
+                    SecureField("API token", text: $cloudflareToken)
+                        .textFieldStyle(.roundedBorder)
+                    Text("Account token with Cloudflare Pages: Read, Workers Scripts: Read and Workers CI: Read.")
+                        .font(.system(size: 10))
+                        .foregroundColor(Color(hex: "#8E939C"))
+                    HStack(spacing: 6) {
+                        Text("Account")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                        Picker("", selection: cloudflareAccountBinding) {
+                            Text("None").tag(String?.none)
+                            ForEach(cloudflareAccountChoices, id: \.id) { account in
+                                Text(account.name).tag(Optional(account.id))
+                            }
+                        }
+                        .labelsHidden()
+                        .controlSize(.small)
+                        .fixedSize()
+                        Spacer()
+                        if loadingCloudflareAccounts {
+                            ProgressView().scaleEffect(0.6)
+                        } else {
+                            Button(cloudflareAccounts.isEmpty ? "Load accounts" : "Refresh") { loadCloudflareAccounts() }
+                                .buttonStyle(.bordered)
+                                .controlSize(.mini)
+                        }
+                    }
+                    IntegrationFilterRow(
+                        label: String(localized: "integrations.projects"),
+                        items: cloudflareProjects,
+                        filter: $state.cloudflareProjectFilter,
+                        loading: loadingCloudflare,
+                        onLoad: loadCloudflareProjects,
+                        emptyCaption: "All selected: every Pages project and the 10 most recently changed Workers."
+                    )
+                }
+
                 // GitHub
                 VStack(alignment: .leading, spacing: 5) {
                     HStack(spacing: 6) {
@@ -1950,6 +2000,18 @@ struct SettingsView: View {
         saveKey("n8n-url",         value: n8nUrl)
         saveKey("n8n-api-key",     value: n8nKey)
         saveKey("vercel-token",    value: vercelToken)
+        let prevCloudflareToken = KeychainStore.shared.get("cloudflare-token")
+        saveKey("cloudflare-token", value: cloudflareToken)
+        if KeychainStore.shared.get("cloudflare-token") != prevCloudflareToken {
+            if cloudflareToken.isEmpty {
+                AppState.shared.cloudflareDeployments = []
+                AppState.shared.cloudflareError = nil
+            } else if state.cloudflareAccountId == nil {
+                loadCloudflareAccounts()
+            } else {
+                CloudflarePoller.shared.pollNow()
+            }
+        }
 
         // Detect GitHub token changes before writing
         let prevGithubToken = KeychainStore.shared.get("github-token")
@@ -2031,6 +2093,70 @@ struct SettingsView: View {
                 if teams.isEmpty { self.statusMessage = "No Vercel teams found: using your personal account." }
             }
         }.resume()
+    }
+
+    // MARK: - Cloudflare account and projects
+
+    /// Loaded accounts, plus the saved account when the list hasn't been loaded yet.
+    private var cloudflareAccountChoices: [(id: String, name: String)] {
+        if let id = state.cloudflareAccountId, !cloudflareAccounts.contains(where: { $0.id == id }) {
+            return [(id, state.cloudflareAccountName ?? id)] + cloudflareAccounts
+        }
+        return cloudflareAccounts
+    }
+
+    private var cloudflareAccountBinding: Binding<String?> {
+        Binding(
+            get: { state.cloudflareAccountId },
+            set: { selectCloudflareAccount($0) }
+        )
+    }
+
+    private func selectCloudflareAccount(_ id: String?) {
+        guard id != state.cloudflareAccountId else { return }
+        state.cloudflareAccountId = id
+        state.cloudflareAccountName = cloudflareAccountChoices.first { $0.id == id }?.name
+        // Projects belong to an account: start over in the new one
+        state.cloudflareProjectFilter = []
+        state.cloudflareFocusProject = nil
+        cloudflareProjects = []
+        CloudflarePoller.shared.accountChanged()
+    }
+
+    private func loadCloudflareAccounts() {
+        guard let token = KeychainStore.shared.get("cloudflare-token") else {
+            statusMessage = "❌ Save Cloudflare token first."
+            return
+        }
+        loadingCloudflareAccounts = true
+        Task {
+            do {
+                let accounts = try await CloudflareAPI.accounts(token: token)
+                cloudflareAccounts = accounts
+                if accounts.isEmpty { statusMessage = "❌ This token can't see any Cloudflare account." }
+                // One account: nothing to choose
+                if state.cloudflareAccountId == nil, accounts.count == 1 { selectCloudflareAccount(accounts[0].id) }
+            } catch let failure as CloudflareAPI.Failure {
+                statusMessage = "❌ Cloudflare: \(failure.message)"
+            } catch {
+                statusMessage = "❌ Can't reach Cloudflare."
+            }
+            loadingCloudflareAccounts = false
+        }
+    }
+
+    private func loadCloudflareProjects() {
+        guard let token = KeychainStore.shared.get("cloudflare-token"), let account = state.cloudflareAccountId else {
+            statusMessage = "❌ Save Cloudflare token and pick an account first."
+            return
+        }
+        loadingCloudflare = true
+        Task {
+            let names = (try? await CloudflareAPI.projectNames(token: token, account: account)) ?? []
+            cloudflareProjects = names
+            loadingCloudflare = false
+            if names.isEmpty { statusMessage = "❌ No Pages projects or Workers found." }
+        }
     }
 
     // MARK: - GitHub repo list

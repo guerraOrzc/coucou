@@ -219,6 +219,26 @@ Priorité : failure > review demandée > success. Un seul badge/son par cycle.
 
 ---
 
+## 2bis. Cloudflare (Pages et Workers)
+
+Pill `integration_cloudflare`, lecture seule. Réglages : un jeton API (Keychain `cloudflare-token`) avec
+*Cloudflare Pages: Read*, *Workers Scripts: Read* et *Workers CI: Read*, puis le compte (choisi d'office
+s'il n'y en a qu'un), puis la liste des projets suivis (vide = tous les projets Pages et les 10 Workers
+modifiés le plus récemment).
+
+Toutes les 60 s (`CloudflarePoller`) :
+- `GET /accounts/{id}/pages/projects` : un appel, chaque projet porte son `latest_deployment`.
+  En cours tant que la dernière étape n'est pas `deploy` en `success`.
+- `GET /accounts/{id}/workers/scripts`, puis pour chaque Worker suivi :
+  - `GET /accounts/{id}/builds/workers/{tag}/builds` (Workers Builds, Workers reliés à git) ;
+    un Worker sans build n'est redemandé que quand son `modified_on` change ;
+  - `GET /accounts/{id}/workers/scripts/{nom}/deployments`, seulement quand `modified_on` change.
+  Un Worker relié à git affiche ses builds (branche, commit, auteur), sinon ses déploiements.
+
+Le panneau de droite donne la raison d'un échec (dernière ligne d'erreur du journal :
+`.../pages/projects/{p}/deployments/{d}/history/logs` ou `/builds/builds/{uuid}/logs`),
+un lien vers le site et un lien vers le tableau de bord. Pas d'action pour l'instant.
+
 ## 3. Fichiers déposés
 
 - Glisser-déposer natif sur la panel (types `fileURL`). Copier les fichiers dans `~/Library/Application Support/NotchBuddy/inbox/` (c'est la phase `uploading`).

@@ -44,6 +44,25 @@ struct SidePanelView: View {
                         state.vercelFocusProject = project
                         close()
                     })
+            case .cloudflareProjects:
+                FocusPickerPanel(
+                    title: "Projects", accent: "#F6821F", allLabel: "All projects",
+                    options: state.cloudflareFocusOptions,
+                    selection: state.effectiveCloudflareFocus,
+                    attention: othersNeedAttention, onClose: close,
+                    onPick: { project in
+                        state.cloudflareFocusProject = project
+                        close()
+                    })
+            case .cloudflareDeployment(let id):
+                if let dep = state.cloudflareDeployments.first(where: { $0.id == id }) {
+                    CloudflareDeploymentPanel(deployment: dep, attention: othersNeedAttention, onClose: close)
+                } else {
+                    SidePanelChrome(title: "Deployment", accent: "#F6821F", attention: othersNeedAttention,
+                                    onClose: close) {
+                        SidePanelEmpty(text: "This deployment is no longer in the list")
+                    }
+                }
             case .github(let section):
                 GitHubSectionPanel(section: section, pulse: state.githubVisiblePulse,
                                    attention: othersNeedAttention, onClose: close)
@@ -491,6 +510,99 @@ struct VercelDeploymentPanel: View {
             failureReason = nil
             let reason = try? await ServiceAPI.vercelFailureReason(id: deployment.id)
             failureReason = reason ?? "No error message from Vercel"
+        }
+    }
+}
+
+// MARK: - Cloudflare deployment
+// Read-only: what was deployed, why it failed, and links to the site and the dashboard.
+
+struct CloudflareDeploymentPanel: View {
+    let deployment: CloudflareDeployment
+    let attention: Bool
+    let onClose: () -> Void
+    @State private var failureReason: String? = nil
+
+    private var detailLine: String {
+        if let message = deployment.commitMessage?.split(separator: "\n").first { return String(message) }
+        if deployment.kind == .worker, let source = deployment.source { return "Deployed from \(source)" }
+        return "No commit message"
+    }
+
+    private var metaLabel: String {
+        switch deployment.kind {
+        case .pages:  return deployment.environment == "production" ? "Pages · Production" : "Pages · Preview"
+        case .build:  return "Workers Build"
+        case .worker: return "Worker"
+        }
+    }
+
+    var body: some View {
+        let accent = Color(hex: deployment.stateColor)
+        SidePanelChrome(
+            title: deployment.name, accent: deployment.stateColor,
+            trailing: AnyView(
+                Text(deployment.statusLabel)
+                    .font(.system(size: 9.5, weight: .medium))
+                    .foregroundColor(accent)
+                    .padding(.horizontal, 6).padding(.vertical, 2)
+                    .background(accent.opacity(0.14))
+                    .clipShape(Capsule())
+            ),
+            attention: attention, onClose: onClose
+        ) {
+            VStack(alignment: .leading, spacing: 5) {
+                if deployment.status == .failure {
+                    // Failed: the reason takes the commit line (the commit stays in the tooltip)
+                    Text(failureReason ?? "Looking for the error…")
+                        .font(.system(size: 10.5, design: failureReason == nil ? .default : .monospaced))
+                        .foregroundColor(Color(hex: failureReason == nil ? "#6B7079" : "#F4505E").lighter(by: 0.2))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .help([failureReason, detailLine].compactMap { $0 }.joined(separator: "\n\n"))
+                } else {
+                    Text(detailLine)
+                        .font(.system(size: 11))
+                        .foregroundColor(Color(hex: deployment.commitMessage == nil ? "#6B7079" : "#C5C8CD"))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                }
+                HStack(spacing: 8) {
+                    if let branch = deployment.branch {
+                        Label(branch, systemImage: "arrow.branch")
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                    }
+                    Text(metaLabel)
+                    if let author = deployment.author {
+                        Text(author).lineLimit(1).truncationMode(.middle)
+                    }
+                    Text(deployment.timeAgo == "just now" ? "just now" : deployment.timeAgo + " ago")
+                }
+                .font(.system(size: 10))
+                .foregroundColor(Color(hex: "#6B7079"))
+                HStack(spacing: 5) {
+                    if let link = deployment.url, deployment.isSuccess, let url = safeWebURL(link) {
+                        PanelLinkButton(title: "Open", accent: "#F6821F", help: link) {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    if let dash = CloudflareAPI.dashboardURL(for: deployment) {
+                        PanelLinkButton(title: "Dashboard", accent: "#F6821F", help: "Open in the Cloudflare dashboard") {
+                            NSWorkspace.shared.open(dash)
+                        }
+                    }
+                    Spacer(minLength: 0)
+                }
+                .padding(.top, 1)
+            }
+        }
+        // Keyed on the status too: a build that fails while the panel is open gets its reason
+        .task(id: "\(deployment.id)|\(deployment.status)") {
+            guard deployment.status == .failure else { return }
+            failureReason = nil
+            let reason = try? await CloudflareAPI.failureReason(for: deployment)
+            failureReason = reason ?? "No error message from Cloudflare"
         }
     }
 }

@@ -326,6 +326,29 @@ final class AppState: ObservableObject {
         didSet { UserDefaults.standard.set(vercelFocusProject, forKey: "vercelFocusProject") }
     }
 
+    // Cloudflare Pages projects / Workers to watch — empty = all Pages projects and the
+    // 10 most recently changed Workers
+    @Published var cloudflareProjectFilter: Set<String> = [] {
+        didSet {
+            if let data = try? JSONEncoder().encode(Array(cloudflareProjectFilter)) {
+                UserDefaults.standard.set(data, forKey: "cloudflareProjectFilter")
+            }
+        }
+    }
+
+    // Cloudflare account the token reads (a token can reach several)
+    @Published var cloudflareAccountId: String? = nil {
+        didSet { UserDefaults.standard.set(cloudflareAccountId, forKey: "cloudflareAccountId") }
+    }
+    @Published var cloudflareAccountName: String? = nil {
+        didSet { UserDefaults.standard.set(cloudflareAccountName, forKey: "cloudflareAccountName") }
+    }
+
+    // Cloudflare project in focus in the notch — nil = all watched projects
+    @Published var cloudflareFocusProject: String? = nil {
+        didSet { UserDefaults.standard.set(cloudflareFocusProject, forKey: "cloudflareFocusProject") }
+    }
+
     // GitHub repos to watch (nameWithOwner) — empty = the 10 most recently pushed owned repos
     @Published var githubWatchedRepos: Set<String> = [] {
         didSet {
@@ -379,6 +402,10 @@ final class AppState: ObservableObject {
 
     // Vercel deployments (populated by VercelPoller)
     @Published var vercelDeployments: [VercelDeployment] = []
+
+    // Cloudflare Pages deployments, Workers builds and deployments (populated by CloudflarePoller)
+    @Published var cloudflareDeployments: [CloudflareDeployment] = []
+    @Published var cloudflareError: String? = nil
 
     // Resend emails (populated by ResendPoller)
     @Published var resendEmails: [ResendEmail] = []
@@ -560,6 +587,11 @@ final class AppState: ObservableObject {
         vercelTeamId       = ud.string(forKey: "vercelTeamId")
         vercelTeamName     = ud.string(forKey: "vercelTeamName")
         vercelFocusProject = ud.string(forKey: "vercelFocusProject")
+        if let d = ud.data(forKey: "cloudflareProjectFilter"),
+           let a = try? JSONDecoder().decode([String].self, from: d) { cloudflareProjectFilter = Set(a) }
+        cloudflareAccountId    = ud.string(forKey: "cloudflareAccountId")
+        cloudflareAccountName  = ud.string(forKey: "cloudflareAccountName")
+        cloudflareFocusProject = ud.string(forKey: "cloudflareFocusProject")
         if let d = ud.data(forKey: "githubWatchedRepos"),
            let a = try? JSONDecoder().decode([String].self, from: d) { githubWatchedRepos = Set(a) }
         githubFocusRepo    = ud.string(forKey: "githubFocusRepo")
@@ -640,6 +672,31 @@ final class AppState: ObservableObject {
     var vercelVisibleDeployments: [VercelDeployment] {
         guard let p = effectiveVercelFocus else { return vercelWatchedDeployments }
         return vercelWatchedDeployments.filter { $0.projectName == p }
+    }
+
+    /// Cloudflare rows of the watched projects (all of them when the filter is empty).
+    var cloudflareWatchedDeployments: [CloudflareDeployment] {
+        cloudflareProjectFilter.isEmpty ? cloudflareDeployments
+            : cloudflareDeployments.filter { cloudflareProjectFilter.contains($0.name) }
+    }
+
+    /// Projects offered by the notch picker: the watch list, or the projects seen in recent rows.
+    var cloudflareFocusOptions: [String] {
+        if !cloudflareProjectFilter.isEmpty { return cloudflareProjectFilter.sorted() }
+        var seen = Set<String>()
+        return cloudflareDeployments.map(\.name).filter { seen.insert($0).inserted }.sorted()
+    }
+
+    /// The focused project, ignored when it is no longer on the watch list.
+    var effectiveCloudflareFocus: String? {
+        guard let p = cloudflareFocusProject, cloudflareFocusOptions.contains(p) else { return nil }
+        return p
+    }
+
+    /// Rows shown in the notch: watched, narrowed to the focused project.
+    var cloudflareVisibleDeployments: [CloudflareDeployment] {
+        guard let p = effectiveCloudflareFocus else { return cloudflareWatchedDeployments }
+        return cloudflareWatchedDeployments.filter { $0.name == p }
     }
 
     /// Repos offered by the notch picker: the watch list, or the repos in the latest pulse.
@@ -878,6 +935,8 @@ enum SidePanel: Equatable {
     case vercelProjects                    // pick the project in focus
     case github(GitHubDetailSection)       // PRs, reviews or default-branch CI
     case vercelDeployment(String)          // one deployment, by id
+    case cloudflareProjects                // pick the Pages project or Worker in focus
+    case cloudflareDeployment(String)      // one Pages deployment, Workers build or deployment, by id
     case sessionBranch(String)             // a Claude Code session's PR, CI and preview, by task id
     case reply(String)                     // continue a Claude Code session from the notch, by task id
 }
