@@ -8,6 +8,8 @@ import { getCurrentWebview } from "@tauri-apps/api/webview";
 import type { Settings } from "./state";
 import type { RecapHistory, RecapPrefs } from "../recap/summary";
 import type { SpotifyState } from "./spotify";
+import type { UpdateStatus } from "./update";
+import type { WaIslandView, WaSettingsView, WaTestResult } from "./whatsapp";
 
 export const IS_TAURI =
   typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -32,6 +34,175 @@ export interface BootInfo {
   cursorPoll: boolean;
 }
 
+/** The phone link (src-tauri/src/phone_link): how it is, never its secrets. */
+export interface PhoneLinkStatus {
+  enabled: boolean;
+  running: boolean;
+  port: number;
+  host: string;
+  name: string;
+  clients: number;
+  error: string | null;
+  /** The relay connection ("Away from home Wi-Fi"). */
+  relayState: PhoneRelayState;
+}
+
+export type PhoneRelayState = "off" | "connecting" | "waiting" | "linked" | "accessRefused" | "unreachable" | "roomTaken" | "tooMany";
+
+/** The relay switch and address. The access key is write-only: only whether one is stored comes back. */
+export interface PhoneRelayStatus {
+  enabled: boolean;
+  url: string;
+  hasAccess: boolean;
+  state: PhoneRelayState;
+}
+
+/** Session details for the phone: the switch (off by default). */
+export interface PhoneDetailsStatus {
+  enabled: boolean;
+}
+
+/** Chat from the phone: the switch and the models the phone may use ("provider/model"). */
+export interface PhoneChatStatus {
+  enabled: boolean;
+  models: string[];
+}
+
+/** What the settings window shows to pair a phone. Only the settings window may ask. */
+export interface PhoneLinkPairing {
+  link: string;
+  qrSvg: string;
+  host: string;
+  port: number;
+  name: string;
+  /** The relay's host when this link also carries the relay fields. */
+  relay: string | null;
+}
+
+/** One session as the phone sees it; Rust stamps `updatedAt`. */
+export interface PhoneLinkSession {
+  pillId: string;
+  agent: string;
+  state: string;
+  statusText: string;
+  stepIndex: number;
+  stepCount: number;
+  /** Details, for a phone that has the capability (the user's switch). */
+  steps?: string[];
+  finalLine?: string;
+  /** A folder name, never a path. */
+  project?: string;
+  color?: string;
+  /** The files this session changed, for a phone that has `diffs` (Rust cuts them to a name and a count). */
+  files?: PhoneLinkFile[];
+}
+
+export interface PhoneLinkFile {
+  id: number;
+  /** A file name; Rust keeps only its last segment. */
+  name: string;
+  added: number;
+  removed: number;
+  tooLarge?: boolean;
+  isNew?: boolean;
+}
+
+/** One file's diff for the phone that asked: lines as [kind, text], kind "+", "-", " " or "@" (a hunk's first line). */
+export interface PhoneLinkDiff {
+  pillId: string;
+  fileId: number;
+  name: string;
+  added: number;
+  removed: number;
+  tooLarge: boolean;
+  gone: boolean;
+  lines: [string, string][];
+}
+
+/** One plan window for the phone: used percentage (as the island has it) and when it resets (epoch ms). */
+export interface PhoneLinkWindow {
+  usedPct: number;
+  resetsAt: number;
+}
+
+export interface PhoneLinkPlan {
+  fiveHour?: PhoneLinkWindow;
+  sevenDay?: PhoneLinkWindow;
+  resetCredits?: number;
+  planType?: string;
+  updatedAt: number;
+}
+
+export interface PhoneLinkUsage {
+  claude: PhoneLinkPlan | null;
+  codex: PhoneLinkPlan | null;
+}
+
+/**
+ * Last week's recap as the phone gets it: counts, the week's Monday and the busiest agent's name (cap `recap`). The project is a folder name that
+ * Rust sends only to a phone that also may see session details. A week with no session is not sent: all zero clears the phone's card.
+ */
+export interface PhoneLinkRecap {
+  /** The Monday that starts the week, YYYY-MM-DD (local). */
+  week: string;
+  minutes: number;
+  sessions: number;
+  files: number;
+  linesAdded: number;
+  linesRemoved: number;
+  commands: number;
+  allowed: number;
+  denied: number;
+  topAgent?: string;
+  topProject?: string;
+}
+
+/** What one service pill says, for a phone whose user allowed it (Rust cuts every text to size). */
+export interface PhoneLinkService {
+  id: string;
+  title: string;
+  headline: string;
+  reason?: string;
+  items: { label: string; detail: string }[];
+}
+
+export interface PhoneServicesStatus {
+  /** The services allowed for the phone. */
+  services: string[];
+}
+
+export interface PhoneUsageStatus {
+  enabled: boolean;
+}
+
+export interface PhoneRecapStatus {
+  enabled: boolean;
+}
+
+export interface PhoneDiffsStatus {
+  enabled: boolean;
+}
+
+export interface PhoneLinkApproval {
+  requestId: string;
+  sessionId: string;
+  pillId: string;
+  tool: string;
+  command: string;
+}
+
+/** The question Claude Code is waiting on, for a phone that may answer it (phone_link/hub.rs). */
+export interface PhoneLinkQuestion {
+  requestId: string;
+  sessionId: string;
+  pillId: string;
+  questions: { question: string; options: { label: string; description: string }[]; multiSelect: boolean }[];
+}
+
+export interface PhoneAnswersStatus {
+  enabled: boolean;
+}
+
 export const Bridge = {
   boot: () => call<BootInfo>("boot"),
   /** The system's languages as the webview sees them, for Rust's own texts (i18n.rs). */
@@ -53,11 +224,18 @@ export const Bridge = {
   focusWindow: (focused: boolean) => call<void>("focus_window", { focused }),
 
   reposition: () => call<void>("reposition"),
+  fitZoom: (dpr: number) => call<boolean>("fit_zoom", { dpr }),
 
   /** Displays the island can be pinned to: `key` is what `settings.screen` stores. */
   listMonitors: () => call<{ key: string; label: string }[]>("list_monitors"),
 
   openUrl: (url: string) => call<void>("open_url", { url }),
+  /** Opens a GitLab link only when it belongs to the configured instance. */
+  openGitLabUrl: (url: string) => call<void>("open_gitlab_url", { url }),
+  /** Opens the configured Gitea instance without exposing its URL to the page. */
+  openGitea: () => call<void>("open_gitea"),
+  /** Opens a Gitea link only if it belongs to the configured instance. */
+  openGiteaUrl: (url: string) => call<void>("open_gitea_url", { url }),
 
   /** Which of these sounds have a file of the user's own in the sounds folder. */
   customSounds: (names: readonly string[]) => call<string[]>("custom_sounds", { names }),
@@ -138,6 +316,50 @@ export const Bridge = {
   /** "Nobody can act on this" — Claude Code asks in the terminal right away. */
   approvalDecline: (requestId: string) => call<void>("approval_decline", { requestId }),
 
+  // ── Phone link (Coucou for Android) ───────────────────────────────────────
+  phoneLinkStatus: () => call<PhoneLinkStatus>("phone_link_status"),
+  /** Only ever from the switch in Settings. Throws with the reason if it cannot start. */
+  phoneLinkSetEnabled: (enabled: boolean) => callOrThrow<PhoneLinkStatus>("phone_link_set_enabled", { enabled }),
+  phoneLinkPairing: () => callOrThrow<PhoneLinkPairing>("phone_link_pairing"),
+  /** A new code: the phone that had the old one is disconnected. */
+  phoneLinkNewPairing: () => callOrThrow<PhoneLinkPairing>("phone_link_new_pairing"),
+  phoneDetailsStatus: () => call<PhoneDetailsStatus>("phone_details_status"),
+  /** Off by default; only from the switch in Settings. Phones are reconnected so they learn about it. */
+  phoneDetailsSetEnabled: (enabled: boolean) => callOrThrow<PhoneDetailsStatus>("phone_details_set_enabled", { enabled }),
+  phoneAnswersStatus: () => call<PhoneAnswersStatus>("phone_answers_status"),
+  /** Off by default; only from the switch in Settings. Phones are reconnected so they learn about it. */
+  phoneAnswersSetEnabled: (enabled: boolean) => callOrThrow<PhoneAnswersStatus>("phone_answers_set_enabled", { enabled }),
+  phoneDiffsStatus: () => call<PhoneDiffsStatus>("phone_diffs_status"),
+  /** Off by default; only from the switch in Settings. Phones are reconnected so they learn about it. */
+  phoneDiffsSetEnabled: (enabled: boolean) => callOrThrow<PhoneDiffsStatus>("phone_diffs_set_enabled", { enabled }),
+  /** The answer to a phone's request for a file's diff (the "phone-link-getdiff" event); `conn` says which phone. */
+  phoneLinkSendDiff: (conn: number, diff: PhoneLinkDiff) => call<void>("phone_link_send_diff", { conn, diff }),
+  phoneServicesStatus: () => call<PhoneServicesStatus>("phone_services_status"),
+  /** None by default; only from the ticks in Settings. Phones are reconnected so they learn about it. */
+  phoneServicesSet: (services: string[]) => callOrThrow<PhoneServicesStatus>("phone_services_set", { services }),
+  phoneLinkPublishServices: (services: PhoneLinkService[]) => call<void>("phone_link_publish_services", { services }),
+  phoneRelayStatus: () => call<PhoneRelayStatus>("phone_relay_status"),
+  /** Off by default; needs a valid wss:// address and a stored access key. */
+  phoneRelaySet: (enabled: boolean, url: string) => callOrThrow<PhoneRelayStatus>("phone_relay_set", { enabled, url }),
+  /** Write-only: stored in the OS keystore, never sent back. An empty value clears it. */
+  phoneRelaySetAccess: (access: string) => callOrThrow<PhoneRelayStatus>("phone_relay_set_access", { access }),
+  phoneUsageStatus: () => call<PhoneUsageStatus>("phone_usage_status"),
+  /** Off by default; only from the switch in Settings. Phones are reconnected so they learn about it. */
+  phoneUsageSetEnabled: (enabled: boolean) => callOrThrow<PhoneUsageStatus>("phone_usage_set_enabled", { enabled }),
+  phoneLinkPublishUsage: (usage: PhoneLinkUsage) => call<void>("phone_link_publish_usage", { usage }),
+  phoneRecapStatus: () => call<PhoneRecapStatus>("phone_recap_status"),
+  phoneRecapSetEnabled: (enabled: boolean) => callOrThrow<PhoneRecapStatus>("phone_recap_set_enabled", { enabled }),
+  phoneLinkPublishRecap: (recap: PhoneLinkRecap | null) => call<void>("phone_link_publish_recap", { recap: recap ?? {} }),
+  phoneChatStatus: () => call<PhoneChatStatus>("phone_chat_status"),
+  /** Off by default; only from the switch in Settings. Phones are reconnected so they learn about it. */
+  phoneChatSetEnabled: (enabled: boolean) => callOrThrow<PhoneChatStatus>("phone_chat_set_enabled", { enabled }),
+  phoneChatSetModels: (models: string[]) => callOrThrow<PhoneChatStatus>("phone_chat_set_models", { models }),
+  phoneLinkPublish: (sessions: PhoneLinkSession[], approval: PhoneLinkApproval | null) =>
+    call<void>("phone_link_publish", { sessions, approval }),
+  phoneLinkPublishQuestion: (question: PhoneLinkQuestion | null) => call<void>("phone_link_publish_question", { question }),
+  /** What Mochi wears ("auto" or an outfit), for phones that asked for it. */
+  phoneLinkPublishPrefs: (outfit: string) => call<void>("phone_link_publish_prefs", { outfit }),
+
   // ── Chat, files, secrets ──────────────────────────────────────────────────
   /** One chat turn. The API key and any file bytes never leave Rust. */
   chatSend: (query: string, context: ChatContext | null) =>
@@ -211,7 +433,7 @@ export const Bridge = {
   /** Asleep, the cursor poll stops. */
   desktopSetAsleep: (asleep: boolean) => call<void>("desktop_mochi_set_asleep", { asleep }),
 
-  // ── Spotify (src-tauri/src/spotify.rs, Linux) ─────────────────────────────
+  // ── Spotify (src-tauri/src/spotify.rs) ────────────────────────────────────
   /** Reads the player again (the card came on screen) and reports it. */
   spotifyRefresh: () => call<SpotifyState | null>("spotify_refresh"),
   /** True when Spotify took it. `value`: seconds for seek, 0/1 for shuffle and repeat, 0…100 for volume. */
@@ -221,6 +443,48 @@ export const Bridge = {
   spotifyOpen: () => call<boolean>("spotify_open"),
   /** Whether there is a Spotify to launch (Settings). */
   spotifyInstalled: () => call<boolean>("spotify_installed"),
+
+  // ── WhatsApp (src-tauri/src/whatsapp) ─────────────────────────────────────
+  /** The island's copy, asked once at start (then the "whatsapp" event). Island only. */
+  whatsappIsland: () => call<WaIslandView>("whatsapp_island"),
+  /** A conversation opened in the card: its latest messages, the receipt if Settings says so. */
+  whatsappOpen: (chat: string) => call<void>("whatsapp_open", { chat }),
+  whatsappClose: (chat: string) => call<void>("whatsapp_close", { chat }),
+  /** Enter or the send button only. True once the gateway took it. */
+  whatsappSend: (chat: string, text: string) => call<boolean>("whatsapp_send", { chat, text }),
+  /** A chat id, or (Settings) a phone number. */
+  whatsappIgnore: (chat: string) => call<void>("whatsapp_ignore", { chat }),
+  whatsappUnignore: (chat: string) => call<void>("whatsapp_unignore", { chat }),
+  /** Settings only, from here down. */
+  whatsappSettings: () => call<WaSettingsView>("whatsapp_settings"),
+  whatsappSetOptions: (enabled: boolean, muteGroups: boolean, markReadOnOpen: boolean) =>
+    callOrThrow<void>("whatsapp_set_options", { enabled, muteGroups, markReadOnOpen }),
+  /** `credential`: null keeps the stored one, "" removes it. */
+  whatsappSaveGateway: (g: {
+    gateway: "gowa" | "openwa"; url: string; credential: string | null; port: number; autoStart: boolean; gowaPath: string;
+  }) => callOrThrow<void>("whatsapp_save_gateway", g),
+  whatsappTest: () => call<WaTestResult>("whatsapp_test"),
+  /** "Install WhatsApp" / "Update": GOWA from its GitHub releases, on this click only. */
+  whatsappInstall: () => call<void>("whatsapp_install"),
+
+  // ── New versions (src-tauri/src/update.rs) ────────────────────────────────
+  updateStatus: () => call<UpdateStatus>("update_status"),
+  /** The island's question or Settings' toggle: may Coucou look at GitHub on its own? */
+  updateSetConsent: (allowed: boolean) => call<void>("update_set_consent", { allowed }),
+  /** "Check now": one look at GitHub, the toggle on or off. */
+  updateCheck: () => call<UpdateStatus>("update_check"),
+  /** The island opened the card Rust offered ("ask" or "announce"). */
+  updateShown: (kind: "ask" | "announce") => call<void>("update_shown", { kind }),
+  /** Settings → Install X: opens the island's update card. */
+  updateShow: () => call<void>("update_show"),
+  updateLater: () => call<void>("update_later"),
+  /** Blue Mochi in the tray while a new version waits (tray.rs). */
+  trayUpdateHint: (on: boolean) => call<void>("tray_update_hint", { on }),
+  updateDismiss: () => call<void>("update_dismiss"),
+  /** "Update now" (Windows): download, check the SHA-256, run the installer, quit. */
+  updateInstall: () => call<void>("update_install"),
+  /** The release's page on github.com. */
+  updateOpenPage: () => call<void>("update_open_page"),
 };
 
 export type SpotifyAction = "playPause" | "next" | "previous" | "seek" | "shuffle" | "repeat" | "volume";

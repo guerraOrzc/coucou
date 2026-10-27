@@ -8,6 +8,7 @@ on:
   pull_request:
     paths:
       - 'windows/**'
+      - 'scripts/test-whats-new.py'
       - '.github/workflows/windows-ci.yml'
   push:
     branches: [main]
@@ -26,20 +27,20 @@ jobs:
         working-directory: windows
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           persist-credentials: false
 
       # The tests run the TypeScript sources directly, which needs Node 22.18
       # or newer; 24 is the version they are run with locally.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: 24
           cache: npm
           cache-dependency-path: windows/package-lock.json
 
       - name: Cache cargo
-        uses: actions/cache@v4
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -56,6 +57,10 @@ jobs:
 
       - name: Island tests
         run: npm test
+
+      # Every release brings its "What's new" in the 12 languages (src/whats-new/whats-new.json).
+      - name: What's new for this version
+        run: python ../scripts/test-whats-new.py windows
 
       # The app bundles target/release/coucou-hook.exe as a resource, and its
       # build script refuses to run until that file exists. One command per
