@@ -1,6 +1,6 @@
 import Foundation
 
-@main
+@main @MainActor
 enum ClaudeHostTests {
     static var failures = 0
 
@@ -17,6 +17,13 @@ enum ClaudeHostTests {
         check("iTerm", ClaudeHost.terminal(termProgram: "iTerm.app", bundleId: "")?.name == "iTerm")
         check("tmux inside Ghostty: bundle id wins",
               ClaudeHost.terminal(termProgram: "tmux", bundleId: "com.mitchellh.ghostty")?.name == "Ghostty")
+        check("cmux: bundle id wins over TERM_PROGRAM=ghostty",
+              ClaudeHost.terminal(termProgram: "ghostty", bundleId: "com.cmuxterm.app")?.name == "cmux")
+        check("Orca by bundle id", ClaudeHost.terminal(termProgram: "", bundleId: "com.stablyai.orca")?.name == "Orca")
+        check("Conductor by bundle id, no TERM_PROGRAM",
+              ClaudeHost.terminal(termProgram: "", bundleId: "com.conductor.app")?.name == "Conductor")
+        check("Conductor keeps its own bundle id",
+              ClaudeHost.terminal(termProgram: "", bundleId: "com.conductor.app")?.bundleId == "com.conductor.app")
         check("VS Code → nil", ClaudeHost.terminal(termProgram: "vscode", bundleId: "com.microsoft.VSCode") == nil)
         check("Cursor → nil", ClaudeHost.terminal(termProgram: "vscode", bundleId: "com.todesktop.230313mzl4w4u92") == nil)
         check("unknown → nil", ClaudeHost.terminal(termProgram: "", bundleId: "com.example.app") == nil)
@@ -24,9 +31,11 @@ enum ClaudeHostTests {
         print("ClaudeHost.name / pillName")
         check("nil host = VS Code", ClaudeHost.name(for: nil) == "VS Code")
         check("Warp host", ClaudeHost.name(for: "dev.warp.Warp-Stable") == "Warp")
+        check("Conductor host = Open Conductor", ClaudeHost.name(for: "com.conductor.app") == "Conductor")
         check("unknown host = VS Code", ClaudeHost.name(for: "com.example.app") == "VS Code")
         check("editor session → VS Code", ClaudeHost.pillName(hostApp: nil) == "VS Code")
         check("terminal session → Claude Code", ClaudeHost.pillName(hostApp: "dev.warp.Warp-Stable") == "Claude Code")
+        check("Conductor session → Claude Code", ClaudeHost.pillName(hostApp: "com.conductor.app") == "Claude Code")
 
         print("ClaudeHost.terminalCardsEnabled")
         UserDefaults.standard.removeObject(forKey: ClaudeHost.terminalCardsKey)

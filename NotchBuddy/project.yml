@@ -13,6 +13,14 @@ options:
 # Production CloudKit environment, so the iPhone joins it with the
 # CoucouPhoneProduction scheme. Release also compiles PHONE_LINK (the sync
 # stays off until turned on in Settings); Debug stays unsigned without it.
+# FluidAudio (Apache-2.0): Parakeet speech-to-text and speaker diarization on the Mac's
+# Neural Engine, for Flow dictation and the Notetaker (GitHub build only). Its models are
+# downloaded from Hugging Face only when the user clicks Download in Coucou Flow → Settings.
+packages:
+  FluidAudio:
+    url: https://github.com/FluidInference/FluidAudio
+    exactVersion: 0.17.7
+
 configs:
   Debug: debug
   DebugCloud: debug
@@ -25,6 +33,8 @@ settings:
     ENABLE_HARDENED_RUNTIME: YES
     CODE_SIGN_STYLE: Manual
     OTHER_SWIFT_FLAGS: "-strict-concurrency=complete"
+    # Prevent Xcode from scanning Swift source and rewriting Localizable.xcstrings.
+    SWIFT_EMIT_LOC_STRINGS: NO
   configs:
     Debug:
       CODE_SIGNING_REQUIRED: NO
@@ -119,22 +129,47 @@ targets:
       - path: Resources/sounds
         buildPhase: resources
         type: folder
+      - path: Resources/Localizable.xcstrings
+        buildPhase: resources
+      # What's new after an update, once in the notch (WhatsNewViews.swift; GitHub build)
+      - path: Resources/whats-new.json
+        buildPhase: resources
     info:
       path: Resources/Info.plist
       properties:
         CFBundleName: Coucou
         CFBundleDisplayName: Coucou
         CFBundleIdentifier: fr.louisraille.NotchBuddy
-        CFBundleVersion: "9"
-        CFBundleShortVersionString: "0.1.8"
+        CFBundleVersion: "20"
+        CFBundleShortVersionString: "0.5.3"
         CFBundlePackageType: APPL
         LSUIElement: YES
         NSHighResolutionCapable: YES
         NSSupportsAutomaticGraphicsSwitching: YES
-        NSAppleEventsUsageDescription: "Pour sauter au terminal, envoyer des mails et piloter Musique."
+        NSAppleEventsUsageDescription: "Pour sauter au terminal, envoyer des mails et piloter Musique et Spotify."
+        NSMicrophoneUsageDescription: "Coucou uses the microphone when you dictate, and to note your calls when you ask it to."
+        NSAudioCaptureUsageDescription: "Coucou records what your Mac plays only while you note a call, to write down what the other people say."
+        NSSpeechRecognitionUsageDescription: "Coucou turns your voice into the text of a chat message."
         NSAccessibilityUsageDescription: "Pour lire le titre de la fenêtre active et l'attacher comme contexte."
+        NSContactsUsageDescription: "Coucou looks up an email address when you ask it, by voice, to prepare an email."
+        NSFocusStatusUsageDescription: "Coucou stays quiet about new WhatsApp messages while a Focus is on."
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        CFBundleLocalizations:
+          - en
+          - ar
+          - bn
+          - de
+          - es
+          - fr
+          - hi
+          - id
+          - pt-BR
+          - ru
+          - th
+          - tr
+          - zh-Hans
+          - zh-Hant
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: fr.louisraille.NotchBuddy
@@ -147,6 +182,9 @@ targets:
         DebugCloud:
           CODE_SIGN_ENTITLEMENTS: Resources/CoucouCloud.entitlements
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: "DEBUG PHONE_LINK"
+          # The build run every day from Xcode: optimized like Release, so Mochi's
+          # drawing costs what it costs for users (unoptimized Swift was ~2× the CPU).
+          SWIFT_OPTIMIZATION_LEVEL: "-O"
         # The distributed build carries the iPhone sync (off until the user
         # turns it on in Settings), so it needs iCloud and its Developer ID profile.
         Release:
@@ -157,6 +195,15 @@ targets:
           CODE_SIGN_ENTITLEMENTS: Resources/CoucouReleaseCloud.entitlements
           SWIFT_ACTIVE_COMPILATION_CONDITIONS: PHONE_LINK
           PROVISIONING_PROFILE_SPECIFIER: "Coucou Developer ID"
+    dependencies:
+      - package: FluidAudio
+    postBuildScripts:
+      - name: "Write Git Hash to Info.plist"
+        script: |
+          HASH=$(git -C "${SRCROOT}/.." rev-parse --short HEAD 2>/dev/null || echo "unknown")
+          /usr/libexec/PlistBuddy -c "Set :CoucouGitHash ${HASH}" "${TARGET_BUILD_DIR}/${INFOPLIST_PATH}" 2>/dev/null \
+            || /usr/libexec/PlistBuddy -c "Add :CoucouGitHash string ${HASH}" "${TARGET_BUILD_DIR}/${INFOPLIST_PATH}"
+        showEnvVars: false
 
   CoucouAppStore:
     type: application
@@ -173,13 +220,15 @@ targets:
       - path: Resources/sounds
         buildPhase: resources
         type: folder
+      - path: Resources/Localizable.xcstrings
+        buildPhase: resources
     info:
       path: Resources/InfoAppStore.plist
       properties:
         CFBundleName: Coucou
         CFBundleDisplayName: Coucou
         CFBundleIdentifier: fr.louisraille.Coucou
-        CFBundleVersion: "5"
+        CFBundleVersion: "6"
         CFBundleShortVersionString: "1.1"
         CFBundlePackageType: APPL
         LSUIElement: YES
@@ -189,6 +238,21 @@ targets:
         ITSAppUsesNonExemptEncryption: NO
         NSAppTransportSecurity:
           NSAllowsLocalNetworking: true
+        CFBundleLocalizations:
+          - en
+          - ar
+          - bn
+          - de
+          - es
+          - fr
+          - hi
+          - id
+          - pt-BR
+          - ru
+          - th
+          - tr
+          - zh-Hans
+          - zh-Hant
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: fr.louisraille.Coucou
@@ -243,7 +307,7 @@ targets:
         CFBundleName: Coucou
         CFBundleDisplayName: Coucou
         CFBundleIdentifier: fr.louisraille.Coucou
-        CFBundleVersion: "2"
+        CFBundleVersion: "3"
         CFBundleShortVersionString: "1.0"
         CFBundlePackageType: APPL
         LSRequiresIPhoneOS: YES
@@ -323,7 +387,7 @@ targets:
         CFBundleName: CoucouWidgets
         CFBundleDisplayName: Coucou
         CFBundleIdentifier: fr.louisraille.Coucou.Widgets
-        CFBundleVersion: "2"
+        CFBundleVersion: "3"
         CFBundleShortVersionString: "1.0"
         CFBundlePackageType: XPC!
         NSExtension:
@@ -366,7 +430,7 @@ targets:
         CFBundleName: CoucouNotificationContent
         CFBundleDisplayName: Coucou
         CFBundleIdentifier: fr.louisraille.Coucou.NotificationContent
-        CFBundleVersion: "2"
+        CFBundleVersion: "3"
         CFBundleShortVersionString: "1.0"
         CFBundlePackageType: XPC!
         NSExtension:

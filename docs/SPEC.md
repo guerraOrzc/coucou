@@ -8,10 +8,17 @@ Toutes les mesures sont en points macOS. Les valeurs viennent de `reference/notc
 
 - Une `NSPanel` sans bordure : `styleMask [.borderless, .nonactivatingPanel]`, fond transparent, sans ombre, niveau au-dessus de la barre de menus (`.mainMenu + 3` ou équivalent qui passe au-dessus de la barre et des apps plein écran), `collectionBehavior [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary, .ignoresCycle]`.
 - Taille fixe 720 × 320, ancrée en haut au centre de l'écran qui a un notch. L'island est dessinée dedans, collée au bord haut.
+- **Choix de l'écran** (`AppState.islandDisplay`, UserDefaults `islandDisplay`, réglage **Display** dans General) :
+  - `notch` (défaut) : écran avec notch, sinon écran principal. Comportement historique.
+  - `menuBar` : l'écran qui porte la barre de menus (`NSScreen.screens[0]`).
+  - `display:<UUID>` : un écran précis, identifié par `CGDisplayCreateUUIDFromDisplayID` (stable après redémarrage, contrairement à `NSScreenNumber`). Écran débranché → repli sur l'écran avec notch, puis l'écran principal ; il revient dès qu'il est rebranché.
+  - `followMouse` : l'island passe sur l'écran du curseur, uniquement en `hidden` ou `compact` et hors glisser-déposer de Mochi. Ouverte (approbation, chat, salut…), elle ne bouge pas. Vérifié dans la boucle 60 Hz existante, sans timer supplémentaire.
+  - Résolution pure dans `IslandDisplayResolver` (`IslandDisplayChoice.swift`, testé par `scripts/test-display-choice.sh`). `IslandWindowController.relocate(to:)` recalcule la géométrie (notch ou barre), déplace la panel et poste `.islandScreenChanged` pour que `IslandContainer` reprenne ses dimensions au repos.
+  - Recalcul à chaque `NSApplication.didChangeScreenParametersNotification` (écran branché ou débranché, capot fermé, résolution, disposition). La fenêtre Réglages et les envols de Mochi sur le bureau visent l'écran courant de l'island (`IslandWindowController.islandScreen()`).
 - **Clics traversants** : la zone transparente ne doit jamais bloquer les clics. Toggle `ignoresMouseEvents` à 60 Hz selon que `NSEvent.mouseLocation` est dans la forme de l'island (plus 6 pt de marge) ou pas.
 - La panel peut devenir key uniquement quand un champ texte de l'island a le focus (prompt, mail). Sinon elle ne vole jamais le focus.
 - Détection du notch : `NSScreen.safeAreaInsets.top` > 0 et `auxiliaryTopLeftArea` / `auxiliaryTopRightArea`. Largeur du notch `wN` = largeur écran − les deux zones auxiliaires ; hauteur `hN` = `safeAreaInsets.top`. Le prototype utilise `wN = 184`, `hN = 32` : dans l'app, prendre les vraies valeurs.
-- Pas d'écran avec notch (Mac de bureau, écran externe ou capot fermé) : afficher sur l'écran principal une barre noire de 80 pt au repos (`hidden`), avec Mochi visible au centre et son animation en pause ; 240 pt en `compact`, en haut au centre. Hauteur plafonnée à 24 pt et à celle de la barre de menus ; personnage et pastilles adaptés à cette hauteur. Le salut se replie vers les dimensions réelles de la barre compacte. La zone de survol au repos ne déborde pas sous la barre. Les vues ouvertes gardent leur largeur de 640 pt.
+- Pas d'écran avec notch (Mac de bureau, écran externe ou capot fermé), ou écran sans notch choisi dans **Display** : afficher sur cet écran une barre noire de 80 pt au repos (`hidden`), avec Mochi visible au centre et son animation en pause ; 240 pt en `compact`, en haut au centre. Hauteur plafonnée à 24 pt et à celle de la barre de menus ; personnage et pastilles adaptés à cette hauteur. Le salut se replie vers les dimensions réelles de la barre compacte. La zone de survol au repos ne déborde pas sous la barre. Les vues ouvertes gardent leur largeur de 640 pt.
 - Suivi de la souris : polling de `NSEvent.mouseLocation` à chaque frame. Aucune permission nécessaire.
 
 ### Forme de l'island
@@ -101,11 +108,11 @@ Toutes les pastilles déclarées sont définies dans `PillCatalog.all` (source d
 | Catégorie | Titre | Pastilles | Subtitle (repos) | Subtitle (session) |
 |---|---|---|---|---|
 | `workspace` | Where you code | VS Code, Cursor, Antigravity *(GitHub only)*, Codex *(GitHub only)* | Integration | Claude Code / Cursor / Codex / Agent |
-| `agent` | Agents | Gemini CLI *(GitHub only)* | Agent | Agent |
+| `agent` | Agents | Gemini CLI *(GitHub only)*, Copilot CLI *(GitHub only)*, Muse Code *(GitHub only)*, OpenCode *(GitHub only)*, Amp *(GitHub only)*, Hermes *(GitHub only)* | Agent | Agent |
 | `ai` | AI for the chat | Anthropic, Google AI, OpenAI, Ollama, LM Studio | Chat | — |
-| `service` | Services | Resend, n8n, Vercel, GitHub, Notion, Cal.com, Stripe, Apple Music *(GitHub only)* | Integration | — |
+| `service` | Services | Resend, n8n, Vercel, GitHub, Notion, Cal.com, Stripe, Apple Music *(GitHub only)*, Spotify *(GitHub only)* | Integration | — |
 
-Couleurs : Cursor `#C0C4CC`, Codex `#2DD4BF`, Gemini CLI `#8AB4F8`, Antigravity `#E879F9`, pastilles IA = `ChatProvider.accentHex` (Ollama `#FACC15`, LM Studio `#A3E635`).
+Couleurs : Cursor `#C0C4CC`, Codex `#2DD4BF`, Gemini CLI `#8AB4F8`, Antigravity `#E879F9`, Copilot CLI `#818CF8`, Muse Code `#38BDF8`, OpenCode `#4ADE80`, Amp `#F59E0B`, Hermes `#C084FC`, pastilles IA = `ChatProvider.accentHex` (Ollama `#FACC15`, LM Studio `#A3E635`).
 
 Règles :
 - **`mainPillId`** (défaut `integration_claude`) est la pastille workspace toujours chargée. Elle ne compte pas dans les 4 places. Modifiable via le sélecteur Main dans Settings.
@@ -114,7 +121,7 @@ Règles :
 - `removeTask` sur `mainPillId` ou une pastille déclarée + active → reset à `.idle` + `pillBadge = nil` + nom du catalogue (pas de suppression). Sinon → suppression normale.
 - `sortTasksByCatalog` : pastilles du catalogue dans l'ordre du catalogue ; pastilles hors catalogue juste après `integration_claude`.
 - Pastilles `githubOnly` : exclues des builds App Store (`#if APPSTORE`).
-- Hooks (Gemini CLI, Antigravity, Codex) : `isConfigured` = `HookServer.geminiHooksInstalled()` / `agyHooksInstalled()` / `codexHooksInstalled()` sous `#if !APPSTORE`. La section Codex Hooks dans Settings installe les hooks dans `~/.codex/hooks.json` avec le même flux backup + preview que Gemini CLI. Après l'installation, la carte affiche : « run /hooks in Codex or open Hooks in the app's settings to trust them ». Approbations Codex : carte avec Allow et Deny seulement (pas Always) ; updatedPermissions jamais envoyé ; notes « Handled in Codex. » / « Still waiting in Codex. ».
+- Hooks (Gemini CLI, Antigravity, Codex, Copilot CLI, Muse Code) et plugins (OpenCode, Amp, Hermes) : `isConfigured` = méthodes correspondantes de `HookServer` sous `#if !APPSTORE`. La section Codex Hooks dans Settings installe les hooks dans `~/.codex/hooks.json` avec le même flux backup + preview que Gemini CLI. Après l'installation, la carte affiche : « run /hooks in Codex or open Hooks in the app's settings to trust them ». Approbations Codex, Copilot CLI, Muse Code : carte avec Allow et Deny seulement (pas Always) ; updatedPermissions jamais envoyé pour Codex/Copilot/Muse ; notes « Handled in Codex. » / « Handled in Copilot CLI. » / « Handled in Muse Code. ». OpenCode : plugin JS dans `~/.config/opencode/plugins/coucou.js`, événements mappés via EVENT_MAP, lecture depuis `event.properties`. Amp : plugin TypeScript dans `~/.config/amp/plugins/coucou.ts`, `tool.call` retourne toujours `{ action: 'allow' }`. Hermes : plugin Python dans `~/.hermes/plugins/coucou/__init__.py`, approuver depuis le notch nécessite `register_approval_transport` (non disponible en 0.15.x) ; en attendant, `pre_approval_request` affiche « ⏳ Approval pending in Hermes » dans le fil.
 - Pastilles IA (cloud) : `isConfigured` = clé API dans le Keychain. Pastilles IA locales (Ollama, LM Studio) : `isConfigured` = URL serveur non vide (définie via le bouton **Connect** dans Réglages → Chat). Bouton « Chat with… » → change le fournisseur et ouvre la vue `.prompt`.
 
 ### Carte GitHub (`GitHubPulseCardView`)
@@ -234,6 +241,7 @@ Fenêtre Réglages (SwiftUI, simple), sections dans l'ordre d'affichage :
 - **Integrations** : clé ou token (Trousseau) pour chaque service (n8n, Stripe, GitHub, Vercel, Resend, Notion, Cal.com).
 - **Sound** : son on/off, volume.
 - **Behavior** : fermeture après N s d'inactivité ; masquage après N min sans mouvement.
+- **Display** : écran de l'island — Screen with the notch (défaut), Main screen (menu bar), Follow the mouse, ou un écran précis par son nom (`NSScreen.localizedName`). Un écran mémorisé mais débranché s'affiche « Saved screen (not connected) ». Voir §1.
 - **Active pills** : pastilles actives (VS Code toujours actif + jusqu'à 4 autres) ; sélecteur de pastille principale (affiché uniquement si une pastille workspace est active) ; liste par catégorie (voir catalogue §5).
 - **Hotkey** : raccourci global pour ouvrir le notch.
 - **Startup** : lancer au démarrage (`SMAppService.mainApp`).
@@ -374,10 +382,11 @@ Ces raccourcis fonctionnent en arrière-plan sans permission Accessibilité.
 | Couper le son (`toggleMute`) | ⌃⌥M | `shortcut.toggleMute.keyCode` / `.flags` | Oui |
 | Mochi sur le bureau (`toggleDesktopMochi`) | ⌃⌥D | `shortcut.toggleDesktopMochi.keyCode` / `.flags` | Oui |
 | Ouvrir la garde-robe (`openWardrobe`) | ⌃⌥G | `shortcut.openWardrobe.keyCode` / `.flags` | Oui |
+| Capture d'écran pour Claude (`captureScreen`) | ⌘⇧S | `shortcut.captureScreen.keyCode` / `.flags` | Oui (hors App Store) |
 
 - Si Carbon ne peut pas enregistrer un raccourci (conflit système), l'action est marquée `.conflict` dans `HotKeyCenter` et un indicateur apparaît dans Réglages → Raccourcis.
 - `toggleIsland` conserve les clés UserDefaults historiques (`hotkeyCode`, `hotkeyFlags`, `hotkeyEnabled`) pour ne pas casser les préférences existantes.
-- Les actions marquées `isNonAppStore` (`attachFrontWindow`) sont omises du build App Store.
+- Les actions marquées `isNonAppStore` (`attachFrontWindow`, `talkToCoucou`, `captureScreen`) sont omises du build App Store.
 
 ### 14.2 Raccourcis locaux (actifs quand l'île a le focus)
 
@@ -407,3 +416,46 @@ Réglages → Raccourcis (`ShortcutsSettingsView`) :
 - Les conflits système (Carbon a refusé l'enregistrement) sont signalés en orange.
 - Bouton **Tout réinitialiser** remet les valeurs par défaut sur toutes les actions.
 - Les raccourcis locaux sont affichés en lecture seule.
+
+## 15. Mochi et le Mac
+
+`MachineVitals` lit l'état du Mac toutes les 3 s, **seulement quand Mochi est à l'écran** (île visible ou Mochi sur le bureau). Île cachée : aucune lecture. Réglages → Général → « Mochi et ton Mac » (activé par défaut).
+
+| Ce que lit Coucou | Seuil | Mochi |
+|---|---|---|
+| Processeur (`host_statistics`, tous les cœurs) | ≥ 80 % deux lectures de suite | transpire (gouttes), souffle vite |
+| État thermique (`ProcessInfo.thermalState`) | fair / serious / critical | rougit, vagues de chaleur au-dessus de la tête dès serious |
+| Pression mémoire (`DispatchSource.makeMemoryPressureSource`) | warning / critical | gonfle |
+| Batterie (`IOPSCopyPowerSourcesInfo`), sur batterie | < 20 % / < 10 % | paupières lourdes et bâillements / s'endort (z) |
+
+- Les humeurs ne s'affichent que dans les états calmes (idle, working, thinking, searching, finished) ; fatigue et sommeil seulement en idle et finished. Une demande de permission les efface.
+- Brancher le chargeur pendant que Mochi est fatigué : il se réveille (émote happy, son `pop`).
+- Pointeur sur Mochi (ou sur l'île compacte) : une ligne sous l'île dit pourquoi, par ex. « CPU 94 % · node, Google Chrome » (les deux apps qui prennent le plus de processeur, lues seulement quand il transpire).
+- Dessin : `MochiMood.swift` (CoucouKit), l'iPhone ne règle jamais l'humeur.
+
+## 16. Capture d'écran pour Claude (build GitHub)
+
+- ⌘⇧S : l'île se replie, puis la sélection de macOS (`screencapture -i -x -o`) : zone, Espace pour une fenêtre, Échap pour annuler. Première fois : permission Enregistrement de l'écran.
+- L'image arrive dans l'île (vue `.capture`) : son `gulp`, Mochi avale. Boutons : **Coller** (dans l'app où on était : ⌘V, ou ⌃V dans un terminal pour Claude Code ; le presse-papiers reprend son contenu après 1,5 s), **Copier**, **Annoter** (fenêtre : flèche, cadre, crayon, 4 couleurs, ⌘Z, l'image annotée revient dans l'île), **Demander à Claude** (chat de l'île, image jointe).
+- Avec Flow : tant que la capture est dans l'île (3 min max), maintenir la touche de dictée colle l'image puis les mots au relâchement.
+- Les captures restent dans le dossier temporaire (les 20 dernières) et ne partent vers Claude que si on les colle ou qu'on demande à Claude.
+
+## 17. Flow : mode prompt et traduction (build GitHub)
+
+Coucou → Flow → Réglages → « Prompt et traduction ». Les deux passent par Claude avec la clé de l'utilisateur (comme le nettoyage) : seuls les mots partent chez Anthropic, jamais la voix.
+
+- **Mode prompt** (`flowPromptMode`) : ce qui est dit devient un prompt structuré pour un agent (Claude Code, Cursor, ChatGPT…) : objectif, contexte, étapes numérotées, contraintes, « fini quand », seulement les parties qui ont du contenu. Une demande courte reste une ou deux phrases. Rien n'est inventé : chaque exigence, nom, nombre et fichier dit est gardé.
+- **Traduire en** (`flowTranslateTo`, vide = comme je parle) : on parle dans n'importe quelle langue, c'est collé dans la langue choisie. ~70 langues et variantes régionales (`FlowLanguages`), chacune avec ce qui la distingue : anglais US / UK / australien / canadien / irlandais / indien…, français de France / Québec / Suisse (septante, nonante) / Belgique, allemand d'Allemagne / Suisse (jamais ß) / Autriche, espagnol d'Espagne / Mexique / Argentine (voseo) / Colombie / Amérique latine, portugais du Brésil / du Portugal, italien, néerlandais / flamand, chinois simplifié / traditionnel (Taïwan, Hong Kong), turc, arabe, japonais, coréen…
+- Un seul appel fait nettoyage + prompt + traduction (`FlowCleanup.transform`, Claude Haiku, 8 s, 12 s en mode prompt). Les marques ⟦n⟧ des snippets sont gardées. Réponse vide, trop longue ou trop courte (comptée en caractères), ou pas de réponse à temps : les mots sont collés tels qu'entendus.
+
+## 18. Notetaker : écho, intervenants et mots mal entendus (build GitHub)
+
+Constaté sur un vrai appel sans casque : la voix de l'autre revenait dans le micro et passait pour la mienne, un même interlocuteur était coupé en deux personnes, et Parakeet écrivait « UG charging » pour « EV charging ».
+
+- **Une seule horloge.** Le micro et le son du Mac comptent leur temps depuis le même instant : le son du Mac, qui démarre un peu après, commence par le silence manquant. Les lignes et l'écho s'alignent.
+- **L'écho, au son.** Le son du Mac sert de référence : on mesure le délai et la force avec lesquels il revient dans le micro, puis un mot du micro qui n'a pas nettement plus d'énergie (≈ 10 dB) que cet écho est retiré. Avec un casque, l'écho est nul et rien n'est retiré ; parler par-dessus l'autre reste à moi.
+- **L'écho, aux mots.** En plus : trois mots de suite que l'autre a dits dans le même ordre au même moment, et la fin de sa phrase, sont retirés de mes lignes.
+- **Une voix coupée en deux.** Un « intervenant » qui ne parle que par bribes (jamais 3 s d'affilée, peu au total) est rendu à la voix la plus proche (empreinte vocale du diarizer, sinon la plus proche dans le temps).
+- **Mots mal entendus.** Quand Claude écrit les résumés (clé de Réglages → Chat), il corrige d'abord la transcription : mots mal reconnus, hésitations retirées, sans reformuler ni traduire, sans inventer de nom, de numéro ni de lien, `[?]` sur ce qui reste incompréhensible. Chaque correction est vérifiée (une ligne corrigée doit rester proche de l'originale) et ce qui avait été entendu est gardé (`raw`). Il nomme aussi un intervenant quand l'appel dit qui il est ; un nom donné par l'utilisateur n'est jamais remplacé.
+- **Au fil des appels.** Menu ⋯ d'une ligne (ou clic droit) : Corriger la ligne, Dit par…, Supprimer la ligne. Les mots apportés en corrigeant (noms, marques, sigles, mots techniques) et les noms donnés aux intervenants sont retenus (`Notes/vocabulary.json`, 300 max) et envoyés à Claude avec chaque transcription, avec le dictionnaire de Flow. Renommer un intervenant avec le nom d'un autre fusionne les deux.
+- Menu ⋯ de la note : « Corriger à nouveau la transcription ».

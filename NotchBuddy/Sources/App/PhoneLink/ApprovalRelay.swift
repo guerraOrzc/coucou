@@ -57,6 +57,8 @@ final class ApprovalRelay {
     // MARK: Request lifecycle
 
     private func pendingChanged(to approval: ApprovalInfo?) {
+        // Never publish demo approval cards to iCloud
+        if approval?.sessionId == "demo_session" { return }
         let fingerprint = approval.map(Self.fingerprint)
         if let old = current, old.fingerprint != fingerprint {
             pollTask?.cancel()
@@ -121,6 +123,8 @@ final class ApprovalRelay {
             changeToken = nil
             return false
         } catch {
+            // The request was settled on the Mac meanwhile: its poll is cancelled, not failed.
+            if Task.isCancelled || (error as? CKError)?.code == .operationCancelled { return true }
             log("decision check failed: \(error.localizedDescription)")
             return false
         }
@@ -147,10 +151,10 @@ final class ApprovalRelay {
         switch decision {
         case "allow":
             log("allowed from the iPhone: \(pending.tool)")
-            HookServer.shared.sendApprovalDecision("allow")
+            HookServer.shared.sendApprovalDecision("allow", for: pending.id)
         case "deny":
             log("denied from the iPhone: \(pending.tool)")
-            HookServer.shared.sendApprovalDecision("deny")
+            HookServer.shared.sendApprovalDecision("deny", for: pending.id)
         default:
             log("unknown decision '\(decision)', ignored")
         }

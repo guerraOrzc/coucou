@@ -8,7 +8,7 @@ Your Mac does the work, your iPhone keeps you in the loop when you step away: yo
 
 | | |
 |---|---|
-| **Mac** | Coucou **0.1.8 or later** on macOS 15+: the [GitHub build](https://github.com/Louis-CFM/coucou/releases/latest), or the Mac App Store version once it is out |
+| **Mac** | Coucou **0.1.9 or later** on macOS 15+: the [GitHub build](https://github.com/Louis-CFM/coucou/releases/latest), or the Mac App Store version once it is out |
 | **iPhone** | iOS 18 or later. The Lock Screen and Dynamic Island need an iPhone with a Dynamic Island for the island part; every iPhone gets the Lock Screen |
 | **iCloud** | The **same Apple Account** signed in to iCloud on the Mac and the iPhone. That's the whole link: no account to create, no server, no pairing code |
 | **Coucou on iPhone** | From the App Store (coming soon) or [Join the TestFlight beta](https://testflight.apple.com/join/3GpeHv2b) — free, up to 10,000 testers |
@@ -18,7 +18,7 @@ Your Mac does the work, your iPhone keeps you in the loop when you step away: yo
 1. **Install Coucou on your iPhone.**
    - **App Store:** coming soon, the link will be here.
    - **TestFlight beta:** install [TestFlight](https://apps.apple.com/app/testflight/id899247664) from the App Store, then [Join the TestFlight beta](https://testflight.apple.com/join/3GpeHv2b). The beta is free; Apple limits it to 10,000 testers.
-2. **Update Coucou on your Mac** to 0.1.8 or later.
+2. **Update Coucou on your Mac** to 0.1.9 or later.
 3. **On the Mac:** click the Coucou icon in the menu bar → **Settings… → General → iPhone**, and turn on:
    - **Show my agent sessions on my iPhone** (required)
    - **Move Mochi to my iPhone's Dynamic Island when my Mac is locked** (the Live Activity)
@@ -58,7 +58,7 @@ Details in the [privacy policy](https://louis-cfm.github.io/coucou/privacy.html)
 
 **Nothing shows up on the iPhone**
 - The Mac and the iPhone must use the **same Apple Account** in iCloud (Settings → your name on the iPhone, System Settings → your name on the Mac).
-- On the Mac, **Settings → General → iPhone → Show my agent sessions on my iPhone** must be on, with Coucou 0.1.8 or later.
+- On the Mac, **Settings → General → iPhone → Show my agent sessions on my iPhone** must be on, with Coucou 0.1.9 or later.
 - Pull down on the Agents tab to refresh.
 
 **No notifications**
